@@ -154,19 +154,27 @@ def debug(request):
         full_goinception_info = goinception_info
 
     # 备份库
-    try:
-        bak_conn = MySQLdb.connect(
-            host=inception_remote_backup_host,
-            port=int(inception_remote_backup_port),
-            user=inception_remote_backup_user,
-            password=inception_remote_backup_password,
-            connect_timeout=1,
-        )
-        cursor = bak_conn.cursor()
-        cursor.execute("select 1;")
-        backup_info = "normal"
-    except Exception as e:
-        backup_info = f"无法连接goInception备份库\n{e}"
+    if not all([inception_remote_backup_host, inception_remote_backup_port, inception_remote_backup_user]):
+        # 如果备份库配置不完整，跳过检测（备份库是可选的）
+        backup_info = "备份库配置未填写"
+    else:
+        try:
+            # 确保端口号是有效的整数
+            backup_port = int(inception_remote_backup_port) if inception_remote_backup_port else 3306
+            bak_conn = MySQLdb.connect(
+                host=inception_remote_backup_host,
+                port=backup_port,
+                user=inception_remote_backup_user,
+                password=inception_remote_backup_password,
+                connect_timeout=1,
+            )
+            cursor = bak_conn.cursor()
+            cursor.execute("select 1;")
+            backup_info = "normal"
+        except ValueError as e:
+            backup_info = f"goInception备份库端口配置错误，请输入有效的端口号\n{e}"
+        except Exception as e:
+            backup_info = f"无法连接goInception备份库\n{e}"
 
     # PACKAGES
     installed_packages = pkg_resources.working_set

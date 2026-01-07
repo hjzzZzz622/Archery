@@ -49,23 +49,34 @@ def go_inception(request):
         cur.close()
         conn.close()
 
-    try:
-        conn = MySQLdb.connect(
-            host=inception_remote_backup_host,
-            port=int(inception_remote_backup_port),
-            user=inception_remote_backup_user,
-            password=inception_remote_backup_password,
-            charset="utf8mb4",
-            connect_timeout=5,
-        )
-        cur = conn.cursor()
-    except Exception as e:
-        logger.error(traceback.format_exc())
-        result["status"] = 1
-        result["msg"] = "无法连接goInception备份库\n{}".format(str(e))
+    # 检查备份库配置是否完整
+    if not all([inception_remote_backup_host, inception_remote_backup_port, inception_remote_backup_user]):
+        # 如果备份库配置不完整，跳过检测（备份库是可选的）
+        pass
     else:
-        cur.close()
-        conn.close()
+        try:
+            # 确保端口号是有效的整数
+            backup_port = int(inception_remote_backup_port) if inception_remote_backup_port else 3306
+            conn = MySQLdb.connect(
+                host=inception_remote_backup_host,
+                port=backup_port,
+                user=inception_remote_backup_user,
+                password=inception_remote_backup_password,
+                charset="utf8mb4",
+                connect_timeout=5,
+            )
+            cur = conn.cursor()
+        except ValueError as e:
+            logger.error(traceback.format_exc())
+            result["status"] = 1
+            result["msg"] = "goInception备份库端口配置错误，请输入有效的端口号\n{}".format(str(e))
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            result["status"] = 1
+            result["msg"] = "无法连接goInception备份库\n{}".format(str(e))
+        else:
+            cur.close()
+            conn.close()
 
     # 返回结果
     return HttpResponse(json.dumps(result), content_type="application/json")

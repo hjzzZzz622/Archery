@@ -8,6 +8,8 @@ import subprocess
 import simplejson as json
 import datetime
 import tempfile
+import shutil
+from urllib.parse import quote_plus, urlparse, urlunparse
 from bson.son import SON
 from bson import json_util
 from pymongo.errors import OperationFailure
@@ -283,68 +285,133 @@ class MongoEngine(EngineBase):
     warning = None
     methodStr = None
 
+    def _get_mongo_shell(self) -> str:
+        """
+        Return the mongo shell binary to use for CLI-based execution.
+
+        Notes:
+        - Modern environments may only ship `mongosh` (MongoDB Shell) and not the legacy `mongo`.
+        - We cache the detected binary on the engine instance to avoid repeated PATH lookups.
+        """
+        cached = getattr(self, "_mongo_shell", None)
+        if cached:
+            return cached
+        # Prefer `mongosh` when available; fall back to `mongo` for older deployments.
+        self._mongo_shell = shutil.which("mongosh") or shutil.which("mongo") or "mongosh"
+        return self._mongo_shell
+
     def test_connection(self):
         return self.get_all_databases()
 
     def exec_cmd(self, sql, db_name=None, slave_ok=""):
         """审核时执行的语句"""
 
-        if self.port and self.host:
-            msg = ""
-            auth_db = self.instance.db_name or "admin"
-            sql_len = len(sql)
-            is_load = False  # 默认不使用load方法执行mongodb sql语句
-            try:
-                if not sql.startswith("var host=") and sql_len > 4000:
-                    # 在master节点执行的情况，如果sql长度大于4000,就采取load js的方法
-                    # 因为用mongo load方法执行js脚本，所以需要重新改写一下sql，以便回显js执行结果
-                    sql = "var result = " + sql + "\nprintjson(result);"
-                    # 因为要知道具体的临时文件位置，所以用了NamedTemporaryFile模块
-                    fp = tempfile.NamedTemporaryFile(
-                        suffix=".js", prefix="mongo_", dir="/tmp/", delete=True
-                    )
-                    fp.write(sql.encode("utf-8"))
-                    fp.seek(0)  # 把文件指针指向开始，这样写的sql内容才能落到磁盘文件上
-                    cmd = self._build_cmd(
-                        db_name, auth_db, slave_ok, fp.name, is_load=True
-                    )
-                    is_load = True  # 标记使用了load方法，用来在finally里面判断是否需要强制删除临时文件
-                elif (
-                    not sql.startswith("var host=") and sql_len < 4000
-                ):  # 在master节点执行的情况， 如果sql长度小于4000,就直接用mongo shell执行，减少磁盘交换，节省性能
-                    cmd = self._build_cmd(db_name, auth_db, slave_ok, sql=sql)
-                else:
-                    cmd = self._build_cmd(
-                        db_name, auth_db, sql=sql, slave_ok="rs.slaveOk();"
-                    )
-                p = subprocess.Popen(
-                    cmd,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True,
-                )
-                re_msg = []
-                for line in iter(p.stdout.read, ""):
-                    re_msg.append(line)
-                # 因为返回的line中也有可能带有换行符，因此需要先全部转换成字符串
-                __msg = "\n".join(re_msg)
-                _re_msg = []
-                for _line in __msg.split("\n"):
-                    if not _re_msg and re.match("WARNING.*", _line):
-                        # 第一行可能是WARNING语句，因此跳过
-                        continue
-                    _re_msg.append(_line)
+        if not self.host:
+            return ""
 
-                msg = "\n".join(_re_msg)
-                msg = msg.replace("true\n", "")
-            except Exception as e:
-                logger.warning(
-                    f"mongo语句执行报错，语句：{sql}，{e}错误信息{traceback.format_exc()}"
+        msg = ""
+        auth_db = self.instance.db_name or "admin"
+        target_db = db_name or self.db_name or "admin"
+
+        # If Archery "host" is a MongoDB URI (mongodb:// or mongodb+srv://), we must execute via URI,
+        # because Atlas cluster domains (cluster0.x.mongodb.net) typically have SRV records but no A/AAAA.
+        is_connection_string = (
+            self.host.startswith("mongodb://") or self.host.startswith("mongodb+srv://")
+        )
+
+        shell_bin = self._get_mongo_shell()
+        sql_len = len(sql)
+
+        # Prefer `mongosh` which supports Stable API; this is safe in environments that ship mongosh 1+.
+        base_args = [shell_bin, "--quiet"]
+        if shell_bin.endswith("mongosh"):
+            # Atlas deployments are commonly configured for Stable API; passing apiVersion makes behavior explicit.
+            base_args += ["--apiVersion", "1"]
+
+        # Build the connection target:
+        # - URI mode: pass the URI as-is to the shell.
+        # - host/port mode: pass host:port/auth_db.
+        if is_connection_string:
+            connect_target = self.host
+        else:
+            # Keep legacy behavior; requires both host and port.
+            if not self.port:
+                return ""
+            connect_target = f"{self.host}:{self.port}/{auth_db}"
+
+        # Auth flags:
+        # - If URI already contains credentials, do not add --username/--password.
+        # - Otherwise, use CLI flags (avoids building another URI string for the shell).
+        if is_connection_string:
+            parsed = urlparse(connect_target)
+            uri_has_credentials = parsed.username is not None or parsed.password is not None
+        else:
+            uri_has_credentials = False
+
+        auth_args = []
+        if self.user and self.password and not uri_has_credentials:
+            auth_args += ["--username", self.user, "--password", self.password]
+            # Ensure the auth db is consistent with existing Archery instance config.
+            auth_args += ["--authenticationDatabase", auth_db]
+
+        # Build JS to execute:
+        # - Always switch DB context to target_db first.
+        # - If needed, execute slaveOk() before running user SQL.
+        # - For very long SQL strings, write to a temp .js file and pass via --file.
+        is_load = False
+        fp = None
+        try:
+            if not sql.startswith("var host=") and sql_len > 4000:
+                # For large statements, write a JS file for the shell to execute.
+                # We keep the old behavior to print the result for better auditing output.
+                js = f"db=db.getSiblingDB('{target_db}');{slave_ok}"
+                js += "var result = " + sql + "\nprintjson(result);\n"
+                fp = tempfile.NamedTemporaryFile(
+                    suffix=".js", prefix="mongosh_", dir="/tmp/", delete=True
                 )
-            finally:
-                if is_load:
-                    fp.close()
+                fp.write(js.encode("utf-8"))
+                fp.flush()
+                is_load = True
+                cmd_args = base_args + [connect_target] + auth_args + ["--file", fp.name]
+            else:
+                # Inline execution path; keep output small and fast.
+                js = f"db=db.getSiblingDB('{target_db}');{slave_ok}{sql}"
+                cmd_args = base_args + [connect_target] + auth_args + ["--eval", js]
+
+            # Use shell=False so that:
+            # - passwords/quotes do not break the command line
+            # - we avoid shell injection risk from SQL strings
+            cp = subprocess.run(
+                cmd_args,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            # Some warnings/errors may go to stderr; include them to preserve existing error parsing behavior.
+            combined = ""
+            if cp.stdout:
+                combined += cp.stdout
+            if cp.stderr:
+                if combined and not combined.endswith("\n"):
+                    combined += "\n"
+                combined += cp.stderr
+
+            # Normalize output: drop the first WARNING line (keeps existing behavior).
+            lines = combined.splitlines()
+            filtered = []
+            for i, line in enumerate(lines):
+                if i == 0 and re.match(r"WARNING.*", line):
+                    continue
+                filtered.append(line)
+            msg = "\n".join(filtered).replace("true\n", "")
+        except Exception as e:
+            logger.warning(
+                f"mongo语句执行报错，语句：{sql}，{e}错误信息{traceback.format_exc()}"
+            )
+        finally:
+            if is_load and fp:
+                fp.close()
         return msg
 
     # 用来进行判断是否有用户名与密码以及是否需要临时文件的情况，进而返回要执行的mongo命令
@@ -844,26 +911,96 @@ class MongoEngine(EngineBase):
         self.db_name = db_name or self.instance.db_name or "admin"
         auth_db = self.instance.db_name or "admin"
 
-        options = {
-            "host": self.host,
-            "port": self.port,
-            "username": self.user,
-            "password": self.password,
-            "authSource": auth_db,
-            "connect": True,
-            "connectTimeoutMS": 10000,
-        }
+        # Check if host contains a connection string (mongodb:// or mongodb+srv://)
+        is_connection_string = (
+            self.host and 
+            (self.host.startswith("mongodb://") or self.host.startswith("mongodb+srv://"))
+        )
 
-        # only set TLS options while the instance enabled the TLS, to avoid
-        # tlsInsecure option being set but the instance is not enabled the TLS
-        # which would cause pymongo.ConfigurationError
-        if self.instance.is_ssl:
-            options["tls"] = True
-            options["tlsInsecure"] = not self.instance.verify_ssl
-
-        if self.user and self.password:
-            self.conn = pymongo.MongoClient(**options)
+        if is_connection_string:
+            # Use connection string directly
+            connection_string = self.host
+            
+            # Parse the connection string to check if it already has credentials
+            parsed = urlparse(connection_string)
+            has_credentials = parsed.username is not None and parsed.password is not None
+            
+            # If username/password are provided separately and not in connection string, inject them
+            if self.user and self.password and not has_credentials:
+                # Build new connection string with credentials
+                # URL encode username and password to handle special characters
+                encoded_user = quote_plus(self.user)
+                encoded_password = quote_plus(self.password)
+                
+                # Reconstruct the connection string with credentials
+                netloc = f"{encoded_user}:{encoded_password}@{parsed.hostname}"
+                if parsed.port:
+                    netloc += f":{parsed.port}"
+                
+                # Reconstruct the full URL
+                new_parsed = parsed._replace(netloc=netloc)
+                connection_string = urlunparse(new_parsed)
+            
+            # Build connection options
+            options = {
+                "connect": True,
+                "connectTimeoutMS": 10000,
+            }
+            
+            # SSL/TLS configuration
+            # mongodb+srv:// requires TLS/SSL by default
+            if self.host.startswith("mongodb+srv://"):
+                # mongodb+srv:// always requires TLS
+                options["tls"] = True
+                if self.instance.is_ssl:
+                    options["tlsInsecure"] = not self.instance.verify_ssl
+                else:
+                    # Default to verifying SSL for mongodb+srv://
+                    options["tlsInsecure"] = False
+            elif self.instance.is_ssl:
+                # For mongodb://, only enable TLS if explicitly configured
+                options["tls"] = True
+                options["tlsInsecure"] = not self.instance.verify_ssl
+            
+            # Add authSource if specified and not already in connection string
+            if auth_db and auth_db != "admin":
+                parsed = urlparse(connection_string)
+                query_params = {}
+                if parsed.query:
+                    # Parse existing query parameters
+                    for param in parsed.query.split("&"):
+                        if "=" in param:
+                            key, value = param.split("=", 1)
+                            query_params[key] = value
+                
+                # Add or update authSource
+                query_params["authSource"] = auth_db
+                
+                # Reconstruct query string
+                query_string = "&".join(f"{k}={v}" for k, v in query_params.items())
+                new_parsed = parsed._replace(query=query_string)
+                connection_string = urlunparse(new_parsed)
+            
+            self.conn = pymongo.MongoClient(connection_string, **options)
         else:
+            # Use traditional host/port format (backward compatibility)
+            options = {
+                "host": self.host,
+                "port": self.port,
+                "username": self.user,
+                "password": self.password,
+                "authSource": auth_db,
+                "connect": True,
+                "connectTimeoutMS": 10000,
+            }
+
+            # only set TLS options while the instance enabled the TLS, to avoid
+            # tlsInsecure option being set but the instance is not enabled the TLS
+            # which would cause pymongo.ConfigurationError
+            if self.instance.is_ssl:
+                options["tls"] = True
+                options["tlsInsecure"] = not self.instance.verify_ssl
+
             self.conn = pymongo.MongoClient(**options)
 
         return self.conn

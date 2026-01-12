@@ -1,12 +1,12 @@
 # -*- coding: UTF-8 -*-
 
-from django.urls import path
+from django.urls import path, re_path
 from django.views.i18n import JavaScriptCatalog
 
 import sql.instance_database
 import sql.query_privileges
 import sql.sql_optimize
-from common import auth, config, workflow, dashboard, check
+from common import auth, config, workflow, dashboard, check, ui
 from common.twofa import totp
 from sql import (
     views,
@@ -66,6 +66,9 @@ urlpatterns = [
     path("dbaprinciples/", views.dbaprinciples),
     path("dashboard/", dashboard.pyecharts),
     path("dashboard/api/", dashboard.DashboardApi),
+    path("dashboard/data/", dashboard.DashboardDataApi),
+    # 方案 A：Vue SPA 并行入口（/ui/ 与 /ui/* 都回退到同一个 index.html）
+    re_path(r"^ui(?:/.*)?$", ui.index),
     path("group/", views.group),
     path("grouprelations/<int:group_id>/", views.groupmgmt),
     path("instance/", views.instance),

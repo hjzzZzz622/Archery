@@ -72,6 +72,55 @@ def DashboardApi(request):
 
     return JsonResponse({"chart": dashboard_chart})
 
+# 新增接口提供给 Vue 用
+@permission_required("sql.menu_dashboard", raise_exception=True)
+def DashboardDataApi(request):
+    """
+    Vue Dashboard 专用：返回纯数据 JSON，不返回 pyecharts HTML。
+    目前只提供 SQL 上线数量趋势 workflowByDate。
+    GET:
+     - start_date=YYYY-MM-DD
+     - end_date=YYYY-MM-DD
+    """
+    start_date_str = request.GET.get("start_date")
+    end_date_str = request.GET.get("end_date")
+
+    try:
+        start_date = validate_date(start_date_str)
+        end_date = validate_date(end_date_str)
+    except ValidationError:
+        return JsonResponse(
+            {"message": "Invalid date format, expected YYYY-MM-DD"},
+            status=400,
+        )
+    
+    chart_dao = ChartDao()
+
+    # x轴：连续日期列表
+    dates = chart_dao.get_date_list(
+        datetime.strptime(start_date, "%Y-%m-%d"),
+        datetime.strptime(end_date, "%Y-%m-%d"),
+    )
+
+    # y轴： 每天SQL工单数量（ChartDao.workflow_by_date)
+    wf_rows = chart_dao.workflow_by_date(start_date, end_date)["rows"]
+    wf_dict = {row[0]: int(row[1]) for row in wf_rows}
+    counts = [wf_dict.get(day, 0) for day in dates]
+
+    return JsonResponse(
+        {
+            "dateRange": {
+                "startDate": start_date,
+                "endDate": end_date,
+            },
+            "charts": {
+                "workflowByDate": {
+                    "dates": dates,
+                    "counts": counts,
+                }
+            },
+        }
+    )
 
 def validate_date(date_str):
     try:

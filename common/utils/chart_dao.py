@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from django.db import connection
+from django.db.utils import OperationalError, ProgrammingError
 
 
 class ChartDao(object):
@@ -17,6 +18,20 @@ class ChartDao(object):
             for i in fields:
                 column_list.append(i[0])
         return {"column_list": column_list, "rows": rows}
+
+    @staticmethod
+    def __query_ignore_missing_table(sql):
+        """
+        某些可选功能（例如慢查询报表）依赖的表在部分安装/环境中可能不存在。
+        为了不影响核心页面，这里对“表不存在”(MySQL errno 1146) 做降级处理，返回空数据。
+        """
+        try:
+            return ChartDao.__query(sql)
+        except (ProgrammingError, OperationalError) as e:
+            # MySQL: (1146, "Table 'xxx' doesn't exist")
+            if getattr(e, "args", None) and len(e.args) >= 1 and e.args[0] == 1146:
+                return {"column_list": [], "rows": []}
+            raise
 
     # 获取连续时间
     @staticmethod
@@ -153,7 +168,7 @@ class ChartDao(object):
 from mysql_slow_query_review_history
 where checksum = '{checksum}'
 group by date(date_add(ts_min, interval 8 HOUR));"""
-        return self.__query(sql)
+        return self.__query_ignore_missing_table(sql)
 
     # 慢日志历史趋势图(按时长)
     def slow_query_review_history_by_pct_95_time(self, checksum):
@@ -161,7 +176,7 @@ group by date(date_add(ts_min, interval 8 HOUR));"""
 from mysql_slow_query_review_history
 where checksum = '{checksum}'
 group by date(date_add(ts_min, interval 8 HOUR));"""
-        return self.__query(sql)
+        return self.__query_ignore_missing_table(sql)
 
     # 慢日志db/user维度统计
     def slow_query_count_by_db_by_user(self, start_date, end_date):
@@ -175,7 +190,7 @@ group by date(date_add(ts_min, interval 8 HOUR));"""
         """.format(
             start_date, end_date
         )
-        return self.__query(sql)
+        return self.__query_ignore_missing_table(sql)
 
     # 慢日志db维度统计
     def slow_query_count_by_db(self, start_date, end_date):
@@ -189,7 +204,7 @@ group by date(date_add(ts_min, interval 8 HOUR));"""
         """.format(
             start_date, end_date
         )
-        return self.__query(sql)
+        return self.__query_ignore_missing_table(sql)
 
     # 数据库实例类型统计
     def instance_count_by_type(self):

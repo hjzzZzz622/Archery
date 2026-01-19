@@ -52,6 +52,63 @@ npm run build
 
 ### 2 周冲刺（10 天 × 每天 1 小时）
 
+---
+
+### Day 0：基础周（HTML / CSS / JavaScript 最小必备，5 天 × 每天 1 小时）
+
+目的：你先把 **网页三件套**补到“能看懂、能改、能调试”，再回到 Vue 的 Day 1 会顺很多。  
+原则：**只学 Archery Dashboard 用得到的那一点点**。
+
+#### Day0-1：HTML 结构 + CSS flex（让页面先不“塌”）
+- **读（20 分钟）**：
+  - MDN：HTML 基础（了解 `div/button/input`）
+  - MDN：Flex 布局（掌握 `display:flex`、`gap`、`justify-content`、`align-items`）
+- **做（30 分钟，Archery）**：
+  - 打开 `ui/src/pages/DashboardPages.vue`
+  - 把顶部输入区（start/end/刷新按钮）改成一个清晰的 flex 布局（左右对齐、间距统一）
+- **验收（10 分钟）**：
+  - 页面顶部控件不挤、不乱，缩放窗口也基本正常。
+
+#### Day0-2：JavaScript 对象/数组（把接口数据“加工”成你想要的样子）
+- **读（20 分钟）**：
+  - JS 数组：`map/filter/reduce`
+  - JS 对象：`{}`、取值、默认值（`??`）
+- **做（30 分钟，Archery）**：
+  - 在 `DashboardPages.vue` 里加一个“摘要文本”：
+    - 例如：`共 N 天，最高值 M，平均值 A`
+  - 数据来自 `data.charts.workflowByDate.counts`
+- **验收（10 分钟）**：
+  - 你能自己解释：`map` 是怎么把数组变成新数组的。
+
+#### Day0-3：fetch + async/await（网络请求的最小闭环）
+- **读（20 分钟）**：
+  - MDN：`fetch`
+  - 了解 `async/await` + `try/catch`
+- **做（30 分钟，Archery）**：
+  - 打开 `ui/src/api/dashboard.ts`
+  - 在 `DashboardPages.vue` 的 `load()` 里加一行 `console.log(data.value)`
+  - 在浏览器 DevTools 的 Console 里看到返回数据
+- **验收（10 分钟）**：
+  - 你能在 Network 面板里找到 `/dashboard/data/` 这条请求，并看懂 status code。
+
+#### Day0-4：调试能力（Console / Network / Elements）
+- **读（20 分钟）**：
+  - DevTools 三个面板会用：Console、Network、Elements
+- **做（30 分钟，Archery）**：
+  - 故意把请求的日期参数写错一次（比如 `2026-99-99`）
+  - 观察后端返回 400，前端如何显示 error
+- **验收（10 分钟）**：
+  - 你能说清楚：为什么是 400、响应 body 是什么、前端 error 是怎么来的。
+
+#### Day0-5：综合小作业（交互闭环）
+- **做（60 分钟，Archery）**：
+  - 给页面加一个按钮：“最近 7 天”
+  - 点一下自动设置 start/end，然后自动调用 `load()` 刷新图表
+- **验收**：
+  - 你能完整描述一次数据流：按钮点击 → 改日期 → 发请求 → 更新图表。
+
+---
+
 #### Day 1：Vue 基础（组件 + 响应式）
 - **读**：Vue 文档「快速开始」「组合式 API 基础」
 - **做（Archery）**：

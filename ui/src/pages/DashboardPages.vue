@@ -1,6 +1,6 @@
 <template>
     <div style="padding: 16px;">
-      <h2>Dashboard（Vue版）</h2>
+      <h2>Dashboard-2</h2>
   
       <div style="display: flex; gap: 8px; margin: 12px 0;">
         <label>

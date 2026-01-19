@@ -511,12 +511,12 @@ class MysqlEngine(EngineBase):
     ):
         """返回 ResultSet"""
         result_set = ResultSet(full_sql=sql)
-        max_execution_time = kwargs.get("max_execution_time", 0)
-        cursorclass = kwargs.get("cursorclass") or MySQLdb.cursors.Cursor
+        max_execution_time = kwargs.get("max_execution_time", 0)    # 设置查询时间
+        cursorclass = kwargs.get("cursorclass") or MySQLdb.cursors.Cursor # 设置游标类型
         try:
             conn = self.get_connection(db_name=db_name)
-            conn.autocommit(True)
-            cursor = conn.cursor(cursorclass)
+            conn.autocommit(True)   # 设置自动提交模式
+            cursor = conn.cursor(cursorclass)   # 创建游标
             try:
                 cursor.execute(f"set session max_execution_time={max_execution_time};")
             except MySQLdb.OperationalError:

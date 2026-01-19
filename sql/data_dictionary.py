@@ -16,7 +16,7 @@ from sql.utils.resource_group import user_instances
 from .models import Instance
 
 
-@permission_required("sql.menu_data_dictionary", raise_exception=True)
+@permission_required("sql.menu_data_dictionary", raise_exception=True) 
 def table_list(request):
     """数据字典获取表列表"""
     instance_name = request.GET.get("instance_name", "")
@@ -25,11 +25,11 @@ def table_list(request):
 
     if instance_name and db_name:
         try:
-            instance = Instance.objects.get(
+            instance = Instance.objects.get(    # Django ORM，从数据库里查询“数据示例配置”
                 instance_name=instance_name, db_type=db_type
             )
             query_engine = get_engine(instance=instance)
-            db_name = query_engine.escape_string(db_name)
+            db_name = query_engine.escape_string(db_name)   # 转义字符串，防止SQL注入攻击
             data = query_engine.get_group_tables_by_db(db_name=db_name)
             res = {"status": 0, "data": data}
         except Instance.DoesNotExist:

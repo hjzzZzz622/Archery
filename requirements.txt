@@ -4,7 +4,7 @@ requests==2.31.0
 simplejson==3.17.2
 mybatis_mapper2sql==0.1.9
 django-auth-ldap==4.1.0
-python-dateutil==2.8.1
+python-dateutil>=2.8.2
 pymongo==4.6.3
 psycopg2-binary==2.*
 pymysql==0.9.3
@@ -26,7 +26,7 @@ sshtunnel==0.1.5
 pycryptodome==3.19.1
 pyodps==0.*
 numpy==1.*
-pandas==1.*
+pandas==2.2.2
 clickhouse-driver==0.*
 djangorestframework==3.13.1
 djangorestframework-simplejwt==5.2.0

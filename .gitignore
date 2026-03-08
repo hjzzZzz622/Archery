@@ -19,3 +19,12 @@ src/docker-compose-dev
 .coverage
 archery_custom
 dump.rdb
+logs/*
+nohup.out
+docs/*
+
+# Ignore root-level hidden files/directories by default.
+/.*
+# Keep repository-level ignore files visible to git.
+!/.gitignore
+!/.cursorignore

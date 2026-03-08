@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <strong>实例详情</strong>
+            <span class="text-muted" style="margin-left: 12px;">{{ instance.instance_name }}</span>
+        </div>
+        <div class="panel-body">
+            <div class="row">
+                <div class="col-md-3"><strong>实例：</strong><span id="meta-instance-name">{{ instance.instance_name }}</span></div>
+                <div class="col-md-2"><strong>类型：</strong><span id="meta-db-type">{{ instance.db_type }}</span></div>
+                <div class="col-md-3"><strong>地址：</strong><span id="meta-host">{{ instance.host }}:{{ instance.port }}</span></div>
+                <div class="col-md-2"><strong>责任人：</strong><span id="meta-owner">-</span></div>
+                <div class="col-md-2"><strong>隐患数：</strong><span id="meta-risk-count">0</span></div>
+            </div>
+        </div>
+    </div>
+
+    <ul id="instance-detail-tabs" class="nav nav-tabs" role="tablist">
+        <li role="presentation" class="active"><a href="#db-tab" aria-controls="db-tab" role="tab" data-toggle="tab">数据库列表</a></li>
+        <li role="presentation"><a href="#account-tab" aria-controls="account-tab" role="tab" data-toggle="tab">账号列表</a></li>
+        <li role="presentation"><a href="#tablespace-tab" aria-controls="tablespace-tab" role="tab" data-toggle="tab">表空间</a></li>
+        <li role="presentation"><a href="#risk-tab" aria-controls="risk-tab" role="tab" data-toggle="tab">隐患</a></li>
+        <li role="presentation"><a href="#connection-tab" aria-controls="connection-tab" role="tab" data-toggle="tab">连接信息</a></li>
+    </ul>
+
+    <div class="tab-content" style="margin-top: 12px;">
+        <div role="tabpanel" class="tab-pane active table-responsive" id="db-tab">
+            <table id="mongo-db-list" data-toggle="table" class="table table-striped table-hover"></table>
+        </div>
+        <div role="tabpanel" class="tab-pane table-responsive" id="account-tab">
+            <table id="mongo-account-list" data-toggle="table" class="table table-striped table-hover"></table>
+        </div>
+        <div role="tabpanel" class="tab-pane table-responsive" id="tablespace-tab">
+            <table id="mongo-tablespace-list" data-toggle="table" class="table table-striped table-hover"></table>
+        </div>
+        <div role="tabpanel" class="tab-pane table-responsive" id="risk-tab">
+            <table id="mongo-risk-list" data-toggle="table" class="table table-striped table-hover"></table>
+        </div>
+        <div role="tabpanel" class="tab-pane table-responsive" id="connection-tab">
+            <div class="well well-sm">
+                <span style="margin-right: 16px;">实时连接数: <strong id="conn-current">0</strong></span>
+                <span style="margin-right: 16px;">空闲连接数: <strong id="conn-idle">0</strong></span>
+                <span>连接数使用率: <strong id="conn-usage">0%</strong></span>
+            </div>
+            <div id="conn-warning" class="text-warning" style="margin-bottom: 8px;"></div>
+            <table id="mongo-connection-list" data-toggle="table" class="table table-striped table-hover"></table>
+        </div>
+    </div>
+{% endblock content %}
+
+{% block js %}
+    {% load static %}
+    <script>
+        var instanceId = "{{ instance.id }}";
+        var instanceName = "{{ instance.instance_name }}";
+        var loadedTabs = {
+            db: false,
+            account: false,
+            tablespace: false,
+            risk: false,
+            connection: false
+        };
+
+        function fmtMb(value) {
+            return (value || 0) + " MB";
+        }
+
+        function dbDetailFormatter(index, row) {
+            var shards = row.shard_breakdown || [];
+            if (!shards.length) {
+                return "<span class='text-muted'>暂无分片分布数据</span>";
+            }
+            var html = ["<table class='table table-condensed'><thead><tr>",
+                "<th>分片</th><th>表数量</th><th>数据量</th><th>平均数据大小(B)</th><th>数据逻辑大小</th><th>索引数量</th><th>索引存储量</th><th>总存储量</th>",
+                "</tr></thead><tbody>"
+            ];
+            shards.forEach(function (s) {
+                html.push("<tr><td>" + s.shard + "</td><td>" + s.table_count + "</td><td>" + s.data_size_mb +
+                    "</td><td>" + s.avg_obj_size_b + "</td><td>" + s.logical_size_mb + " MB</td><td>" +
+                    s.index_count + "</td><td>" + s.index_size_mb + " MB</td><td>" + s.storage_size_mb + " MB</td></tr>");
+            });
+            html.push("</tbody></table>");
+            return html.join("");
+        }
+
+        function tableDetailFormatter(index, row) {
+            var shards = row.shard_breakdown || [];
+            if (!shards.length) {
+                return "<span class='text-muted'>暂无分片分布数据</span>";
+            }
+            var html = ["<table class='table table-condensed'><thead><tr>",
+                "<th>分片</th><th>数据量</th><th>数据逻辑大小</th><th>平均数据大小(B)</th><th>总存储量</th><th>索引大小</th><th>索引数量</th>",
+                "</tr></thead><tbody>"
+            ];
+            shards.forEach(function (s) {
+                html.push("<tr><td>" + s.shard + "</td><td>" + s.data_count + "</td><td>" + s.logical_size_mb +
+                    " MB</td><td>" + s.avg_obj_size_b + "</td><td>" + s.storage_size_mb + " MB</td><td>" +
+                    s.index_size_mb + " MB</td><td>" + s.index_count + "</td></tr>");
+            });
+            html.push("</tbody></table>");
+            return html.join("");
+        }
+
+        function gotoDDL(dbName) {
+            var shadowSql = "db.createCollection('shadow_" + dbName + "');";
+            var url = "/submitsql/?instance_name=" + encodeURIComponent(instanceName) + "&db_name=" + encodeURIComponent(dbName) + "&sql_content=" + encodeURIComponent(shadowSql);
+            window.open(url, "_blank");
+        }
+
+        function copyTable(dbName, tableName) {
+            var text = dbName + "." + tableName;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                    alert("已复制: " + text);
+                });
+            } else {
+                alert(text);
+            }
+        }
+
+        function loadMeta() {
+            $.get("/instance/mongo/detail/meta/", {instance_id: instanceId}, function (res) {
+                if (res.status !== 0) {
+                    alert(res.msg || "加载实例信息失败");
+                    return;
+                }
+                $("#meta-owner").text(res.data.owner || "-");
+                $("#meta-risk-count").text(res.data.risk_count || 0);
+            }, "json");
+        }
+
+        function loadDbTab() {
+            $('#mongo-db-list').bootstrapTable('destroy').bootstrapTable({
+                method: 'get',
+                url: '/instance/mongo/database/list/',
+                queryParams: function () { return {instance_id: instanceId}; },
+                search: true,
+                pagination: true,
+                pageSize: 20,
+                pageList: [20, 50, 100],
+                detailView: true,
+                detailFormatter: dbDetailFormatter,
+                responseHandler: function (res) {
+                    if (res.status !== 0) {
+                        alert(res.msg || "数据库列表加载失败");
+                        return [];
+                    }
+                    return res.rows || [];
+                },
+                columns: [
+                    {title: '分片', field: 'shard'},
+                    {title: '数据库名', field: 'db_name'},
+                    {title: '表数量', field: 'table_count'},
+                    {title: '数据量', field: 'data_count'},
+                    {title: '数据平均大小(B)', field: 'avg_obj_size_b'},
+                    {title: '数据逻辑大小', field: 'logical_size_mb', formatter: fmtMb},
+                    {title: '索引数量', field: 'index_count'},
+                    {title: '索引存储量', field: 'index_size_mb', formatter: fmtMb},
+                    {title: '总存储量', field: 'storage_size_mb', formatter: fmtMb},
+                    {
+                        title: '操作',
+                        formatter: function (value, row) {
+                            return "<button class='btn btn-primary btn-xs' onclick=\"gotoDDL('" + row.db_name + "')\">创建影子表</button>";
+                        }
+                    }
+                ],
+                onLoadError: onLoadErrorCallback
+            });
+            loadedTabs.db = true;
+        }
+
+        function loadAccountTab() {
+            $('#mongo-account-list').bootstrapTable('destroy').bootstrapTable({
+                method: 'get',
+                url: '/instance/mongo/account/list/',
+                queryParams: function () { return {instance_id: instanceId}; },
+                search: true,
+                pagination: true,
+                pageSize: 20,
+                responseHandler: function (res) {
+                    if (res.status !== 0) {
+                        alert(res.msg || "账号列表加载失败");
+                        return [];
+                    }
+                    return res.rows || [];
+                },
+                columns: [
+                    {title: '账号', field: 'user'},
+                    {title: '库名', field: 'db_name'},
+                    {title: '表名', field: 'table_name'},
+                    {title: '权限', field: 'privileges'}
+                ],
+                onLoadError: onLoadErrorCallback
+            });
+            loadedTabs.account = true;
+        }
+
+        function loadTablespaceTab() {
+            $('#mongo-tablespace-list').bootstrapTable('destroy').bootstrapTable({
+                method: 'get',
+                url: '/instance/mongo/tablespace/list/',
+                queryParams: function () { return {instance_id: instanceId}; },
+                search: true,
+                pagination: true,
+                pageSize: 20,
+                detailView: true,
+                detailFormatter: tableDetailFormatter,
+                responseHandler: function (res) {
+                    if (res.status !== 0) {
+                        alert(res.msg || "表空间加载失败");
+                        return [];
+                    }
+                    return res.rows || [];
+                },
+                columns: [
+                    {title: '数据库', field: 'db_name'},
+                    {title: '表名', field: 'table_name'},
+                    {title: '存储引擎', field: 'engine'},
+                    {title: '是否分片', field: 'is_sharded'},
+                    {title: '数据量', field: 'data_count'},
+                    {title: '数据块数量', field: 'chunk_count'},
+                    {title: '数据逻辑大小', field: 'logical_size_mb', formatter: fmtMb},
+                    {title: '平均数据大小(B)', field: 'avg_obj_size_b'},
+                    {title: '总存储量', field: 'storage_size_mb', formatter: fmtMb},
+                    {title: '索引大小', field: 'index_size_mb', formatter: fmtMb},
+                    {title: '索引数量', field: 'index_count'},
+                    {title: '分片是否倾斜', field: 'is_skewed'},
+                    {
+                        title: '操作',
+                        formatter: function (value, row) {
+                            return "<button class='btn btn-default btn-xs' onclick=\"copyTable('" + row.db_name + "','" + row.table_name + "')\">复制</button>";
+                        }
+                    }
+                ],
+                onLoadError: onLoadErrorCallback
+            });
+            loadedTabs.tablespace = true;
+        }
+
+        function loadRiskTab() {
+            $('#mongo-risk-list').bootstrapTable('destroy').bootstrapTable({
+                method: 'get',
+                url: '/instance/mongo/risk/list/',
+                queryParams: function () { return {instance_id: instanceId}; },
+                search: true,
+                pagination: true,
+                pageSize: 20,
+                responseHandler: function (res) {
+                    if (res.status !== 0) {
+                        alert(res.msg || "隐患列表加载失败");
+                        return [];
+                    }
+                    return res.rows || [];
+                },
+                columns: [
+                    {title: '服务名', field: 'service_name'},
+                    {title: '巡检类型', field: 'risk_type'},
+                    {title: '责任人', field: 'owner'},
+                    {title: '数量', field: 'count'},
+                    {title: '操作', formatter: function () { return ""; }}
+                ],
+                onLoadError: onLoadErrorCallback
+            });
+            loadedTabs.risk = true;
+        }
+
+        function loadConnectionTab() {
+            $.get("/instance/mongo/connection/list/", {instance_id: instanceId}, function (res) {
+                if (res.status !== 0) {
+                    alert(res.msg || "连接信息加载失败");
+                    return;
+                }
+                var summary = res.data.summary || {};
+                $("#conn-current").text(summary.current_connections || 0);
+                $("#conn-idle").text(summary.idle_connections || 0);
+                $("#conn-usage").text((summary.usage_rate || 0) + "%");
+                $("#conn-warning").text(res.data.warning_msg || "");
+                $('#mongo-connection-list').bootstrapTable('destroy').bootstrapTable({
+                    data: res.data.rows || [],
+                    search: true,
+                    pagination: true,
+                    pageSize: 20,
+                    columns: [
+                        {title: '客户端IP', field: 'client_ip'},
+                        {title: '连接数', field: 'connections'}
+                    ]
+                });
+            }, "json");
+            loadedTabs.connection = true;
+        }
+
+        $(document).ready(function () {
+            loadMeta();
+            loadDbTab();
+            $('#instance-detail-tabs a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+                var target = $(e.target).attr("href");
+                if (target === "#account-tab" && !loadedTabs.account) {
+                    loadAccountTab();
+                } else if (target === "#tablespace-tab" && !loadedTabs.tablespace) {
+                    loadTablespaceTab();
+                } else if (target === "#risk-tab" && !loadedTabs.risk) {
+                    loadRiskTab();
+                } else if (target === "#connection-tab" && !loadedTabs.connection) {
+                    loadConnectionTab();
+                }
+            });
+        });
+    </script>
+{% endblock %}

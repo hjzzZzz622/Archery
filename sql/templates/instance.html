@@ -137,7 +137,10 @@
                         field: 'instance_name',
                         sortable: true,
                         formatter: function (value, row, index) {
-                            return "<a target=\"_blank\" href=\"/admin/sql/instance/" + row.id + "/change/\">" + value + "</a>"
+                            if (row.db_type === "mongo") {
+                                return "<a target=\"_blank\" href=\"/instance/detail/" + row.id + "/\">" + value + "</a>";
+                            }
+                            return "<a target=\"_blank\" href=\"/admin/sql/instance/" + row.id + "/change/\">" + value + "</a>";
                         }
                     }, {
                         title: '实例类型',

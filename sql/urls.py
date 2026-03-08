@@ -6,6 +6,7 @@ from django.views.i18n import JavaScriptCatalog
 import sql.instance_database
 import sql.query_privileges
 import sql.sql_optimize
+import sql.instance_mongo_detail
 from common import auth, config, workflow, dashboard, check, ui
 from common.twofa import totp
 from sql import (
@@ -72,6 +73,7 @@ urlpatterns = [
     path("group/", views.group),
     path("grouprelations/<int:group_id>/", views.groupmgmt),
     path("instance/", views.instance),
+    path("instance/detail/<int:instance_id>/", views.instance_detail),
     path("instanceaccount/", views.instanceaccount),
     path("database/", views.database),
     path("instanceparam/", views.instance_param),
@@ -109,6 +111,15 @@ urlpatterns = [
     path("group/changeauditors/", resource_group.changeauditors),
     path("group/user_all_instances/", resource_group.user_all_instances),
     path("instance/list/", instance.lists),
+    path("instance/mongo/detail/meta/", sql.instance_mongo_detail.detail_meta),
+    path("instance/mongo/database/list/", sql.instance_mongo_detail.database_list),
+    path("instance/mongo/account/list/", sql.instance_mongo_detail.account_list),
+    path("instance/mongo/tablespace/list/", sql.instance_mongo_detail.tablespace_list),
+    path("instance/mongo/risk/list/", sql.instance_mongo_detail.risk_list),
+    path(
+        "instance/mongo/connection/list/",
+        sql.instance_mongo_detail.connection_list,
+    ),
     path("instance/mongo/refresh/", instance.refresh_mongo_metrics),
     path("instance/user/list", instance_account.users),
     path("instance/user/create/", instance_account.create),

@@ -15,7 +15,6 @@ from sql.engines import get_engine, engine_map
 from common.utils.permission import superuser_required
 from common.utils.convert import Convert
 from sql.utils.tasks import task_info
-from sql.utils.resource_group import user_groups
 
 from .models import (
     Users,
@@ -284,7 +283,7 @@ def detail(request, workflow_id):
     # 添加当前审核人信息
     current_reviewers = []
     for node in review_info.nodes:
-        if node.is_current_node == False:
+        if not node.is_current_node:
             continue
         for user in node.group.user_set.filter(is_active=1):
             # 确保 group_name 和 group.name 类型一致
@@ -430,7 +429,7 @@ def queryapplydetail(request, apply_id):
     # 添加当前审核人信息
     current_reviewers = []
     for node in review_info.nodes:
-        if node.is_current_node == False:
+        if not node.is_current_node:
             continue
         for user in node.group.user_set.filter(is_active=1):
             # 确保 group_name 和 group.name 类型一致
@@ -476,6 +475,15 @@ def instance(request):
     # 获取实例标签
     tags = InstanceTag.objects.filter(active=True)
     return render(request, "instance.html", {"tags": tags, "engines": engine_map})
+
+
+@permission_required("sql.menu_instance", raise_exception=True)
+def instance_detail(request, instance_id):
+    """实例详情页（Mongo）"""
+    instance = get_object_or_404(
+        user_instances(request.user, db_type=["mongo"]), id=instance_id
+    )
+    return render(request, "instance_detail.html", {"instance": instance})
 
 
 @permission_required("sql.menu_instance_account", raise_exception=True)
@@ -567,7 +575,7 @@ def archive_detail(request, id):
     # 添加当前审核人信息
     current_reviewers = []
     for node in review_info.nodes:
-        if node.is_current_node == False:
+        if not node.is_current_node:
             continue
         for user in node.group.user_set.filter(is_active=1):
             # 确保 group_name 和 group.name 类型一致
@@ -607,7 +615,9 @@ def config(request):
         sys_config["default_chat_model"] = "gpt-3.5-turbo"
     if not sys_config.get("default_query_template", ""):
         sys_config["default_query_template"] = (
-            "你是一个熟悉 {{db_type}} 的工程师, 我会给你一些基本信息和要求, 你会生成一个查询语句给我使用, 不要返回任何注释和序号, 仅返回查询语句：{{table_schema}} \n {{user_input}}"
+            "你是一个熟悉 {{db_type}} 的工程师, 我会给你一些基本信息和要求, "
+            "你会生成一个查询语句给我使用, 不要返回任何注释和序号, 仅返回查询语句："
+            "{{table_schema}} \n {{user_input}}"
         )
 
     context = {

@@ -1,6 +1,5 @@
 # -*- coding: UTF-8 -*-
 
-import MySQLdb
 import os
 import time
 
@@ -14,8 +13,15 @@ from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.convert import Convert
 from sql.engines import get_engine
 from sql.plugins.schemasync import SchemaSync
+from sql.utils.mongo_instance_metrics import collect_mongo_instance_metrics
 from sql.utils.sql_utils import filter_db_list
-from .models import Instance, ParamTemplate, ParamHistory
+from .models import (
+    Instance,
+    ParamTemplate,
+    ParamHistory,
+    MongoInstanceMeta,
+    MongoInstanceMetricSnapshot,
+)
 
 
 @permission_required("sql.menu_instance_list", raise_exception=True)
@@ -64,8 +70,120 @@ def lists(request):
 
     # QuerySet 序列化
     rows = [row for row in instances]
+    mongo_ids = [row["id"] for row in rows if row["db_type"] == "mongo"]
+    try:
+        mongo_meta_map = {
+            meta.instance_id: meta
+            for meta in MongoInstanceMeta.objects.filter(instance_id__in=mongo_ids)
+        }
+        mongo_metrics_map = {
+            metric.instance_id: metric
+            for metric in MongoInstanceMetricSnapshot.objects.filter(
+                instance_id__in=mongo_ids
+            )
+        }
+    except Exception:
+        mongo_meta_map = {}
+        mongo_metrics_map = {}
+    mongo_defaults = {
+        "region": "",
+        "set_name": "",
+        "l5": "",
+        "vip": "",
+        "proxy_count": 0,
+        "mongod_count": 0,
+        "shard_count": 0,
+        "business_owner": "",
+        "importance": "",
+        "env_type": "",
+        "database_type": "",
+        "proxy_version": "",
+        "mongod_version": "",
+        "cpu_cores": None,
+        "memory_gb": None,
+        "disk_gb": None,
+        "database_count": 0,
+        "table_count": 0,
+        "status": "",
+        "risk_count": 0,
+        "balancer_status": "",
+        "balancer_at": None,
+    }
+    for row in rows:
+        row.update(mongo_defaults)
+        if row["db_type"] != "mongo":
+            continue
+        row["database_type"] = row["db_type"]
+        meta = mongo_meta_map.get(row["id"])
+        metrics = mongo_metrics_map.get(row["id"])
+        if meta:
+            row.update(
+                {
+                    "region": meta.region,
+                    "set_name": meta.set_name,
+                    "l5": meta.l5,
+                    "vip": meta.vip,
+                    "business_owner": meta.business_owner,
+                    "importance": meta.importance,
+                    "env_type": meta.env_type,
+                    "proxy_version": meta.proxy_version,
+                    "mongod_version": meta.mongod_version,
+                    "cpu_cores": meta.cpu_cores,
+                    "memory_gb": meta.memory_gb,
+                    "disk_gb": meta.disk_gb,
+                }
+            )
+        if metrics:
+            row.update(
+                {
+                    "proxy_count": metrics.proxy_count,
+                    "mongod_count": metrics.mongod_count,
+                    "shard_count": metrics.shard_count,
+                    "database_count": metrics.database_count,
+                    "table_count": metrics.table_count,
+                    "status": metrics.status,
+                    "risk_count": metrics.risk_count,
+                    "balancer_status": metrics.balancer_status,
+                    "balancer_at": metrics.balancer_at,
+                }
+            )
+        else:
+            row["status"] = "pending"
 
     result = {"total": count, "rows": rows}
+    return HttpResponse(
+        json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
+        content_type="application/json",
+    )
+
+
+@permission_required("sql.menu_instance_list", raise_exception=True)
+def refresh_mongo_metrics(request):
+    """手动刷新Mongo实例动态指标"""
+    instance_id = request.POST.get("instance_id")
+    result = {"status": 0, "msg": "ok", "data": {}}
+    if not instance_id:
+        result["status"] = 1
+        result["msg"] = "参数缺失: instance_id"
+        return HttpResponse(json.dumps(result), content_type="application/json")
+    try:
+        instance = Instance.objects.get(id=instance_id)
+    except Instance.DoesNotExist:
+        result["status"] = 1
+        result["msg"] = "实例不存在"
+        return HttpResponse(json.dumps(result), content_type="application/json")
+    if instance.db_type != "mongo":
+        result["status"] = 1
+        result["msg"] = "仅支持Mongo实例刷新"
+        return HttpResponse(json.dumps(result), content_type="application/json")
+
+    metrics = collect_mongo_instance_metrics(instance)
+    if metrics.get("status") != "ok":
+        result["status"] = 1
+        result["msg"] = "刷新失败"
+    else:
+        result["msg"] = "刷新成功"
+    result["data"] = metrics
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -249,7 +367,10 @@ def schemasync(request):
         "tag": tag,
         "output-directory": output_directory,
         "source": f"mysql://{username}:{password}@{instance.host}:{instance.port}/{db_name}",
-        "target": f"mysql://{target_username}:{target_password}@{target_instance.host}:{target_instance.port}/{target_db_name}",
+        "target": (
+            f"mysql://{target_username}:{target_password}@"
+            f"{target_instance.host}:{target_instance.port}/{target_db_name}"
+        ),
     }
     # 参数检查
     args_check_result = schema_sync.check_args(args)

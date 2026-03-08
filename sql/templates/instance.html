@@ -16,6 +16,9 @@
                 {% for name, engine in engines.items %}
                     <option value="{{ name }}">{{ engine.name }}</option>
                 {%  endfor %}
+                {% if 'mongo' not in engines %}
+                    <option value="mongo">MongoDB</option>
+                {% endif %}
             </select>
         </div>
         <div class="form-group">
@@ -75,6 +78,7 @@
     <script>
         //获取列表
         function instancelist() {
+            var showMongoColumns = $("#db_type").val() === "mongo";
             //采取异步请求
             //初始化table
             $('#instance-list').bootstrapTable('destroy').bootstrapTable({
@@ -153,16 +157,114 @@
                         title: 'USER',
                         field: 'user'
                     }, {
+                        title: 'region',
+                        field: 'region',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'set名称',
+                        field: 'set_name',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'L5',
+                        field: 'l5',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'VIP',
+                        field: 'vip',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'proxy数量',
+                        field: 'proxy_count',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'mongod数量',
+                        field: 'mongod_count',
+                        visible: showMongoColumns
+                    }, {
+                        title: '分片数',
+                        field: 'shard_count',
+                        visible: showMongoColumns
+                    }, {
+                        title: '业务责任人',
+                        field: 'business_owner',
+                        visible: showMongoColumns
+                    }, {
+                        title: '重要性',
+                        field: 'importance',
+                        visible: showMongoColumns
+                    }, {
+                        title: '环境类型',
+                        field: 'env_type',
+                        visible: showMongoColumns
+                    }, {
+                        title: '数据库类型',
+                        field: 'database_type',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'proxy版本',
+                        field: 'proxy_version',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'mongod版本',
+                        field: 'mongod_version',
+                        visible: showMongoColumns
+                    }, {
+                        title: 'CPU/核',
+                        field: 'cpu_cores',
+                        visible: showMongoColumns
+                    }, {
+                        title: '内存/GB',
+                        field: 'memory_gb',
+                        visible: showMongoColumns
+                    }, {
+                        title: '磁盘/GB',
+                        field: 'disk_gb',
+                        visible: showMongoColumns
+                    }, {
+                        title: '库数量',
+                        field: 'database_count',
+                        visible: showMongoColumns
+                    }, {
+                        title: '表数量',
+                        field: 'table_count',
+                        visible: showMongoColumns
+                    }, {
+                        title: '状态',
+                        field: 'status',
+                        visible: showMongoColumns
+                    }, {
+                        title: '隐患个数',
+                        field: 'risk_count',
+                        visible: showMongoColumns
+                    }, {
+                        title: '调匀器状态',
+                        field: 'balancer_status',
+                        visible: showMongoColumns
+                    }, {
+                        title: '调匀时间点',
+                        field: 'balancer_at',
+                        visible: showMongoColumns,
+                        formatter: function (value) {
+                            if (!value) {
+                                return '';
+                            }
+                            return value;
+                        }
+                    }, {
                         title: '操作',
                         field: '',
                         formatter: function (value, row, index) {
                             var btn_del_binLog = '';
                             var btn_user_manger = '';
+                            var btn_refresh_mongo = '';
                             if (row.db_type === 'mysql') {
                                 btn_del_binLog = "<button class=\"btn btn-danger btn-xs\" instance_id=\"" + row.id + "\" + instance_name=\"" + row.instance_name + "\"+ onclick=\"del_binLog(this)" + "\">Binlog清理</button>\n"
                             }
+                            if (row.db_type === 'mongo') {
+                                btn_refresh_mongo = "<button class=\"btn btn-info btn-xs\" instance_id=\"" + row.id + "\" onclick=\"refresh_mongo_metrics(this)\">刷新指标</button>\n";
+                            }
                             var btn_test = "<button class=\"btn btn-warning btn-xs\" instance_id=\"" + row.id + "\" onclick=\"check_instance(this)" + "\">测试</button>\n";
-                            return btn_user_manger + btn_del_binLog + btn_test
+                            return btn_user_manger + btn_del_binLog + btn_refresh_mongo + btn_test
                         }
                     }],
                 onLoadSuccess: function () {
@@ -174,6 +276,28 @@
                 }
             });
 
+        }
+
+        function refresh_mongo_metrics(obj) {
+            $.ajax({
+                type: "post",
+                url: "/instance/mongo/refresh/",
+                dataType: "json",
+                data: {
+                    "instance_id": $(obj).attr("instance_id")
+                },
+                success: function (data) {
+                    if (data.status === 0) {
+                        alert("刷新成功");
+                    } else {
+                        alert(data.msg || "刷新失败");
+                    }
+                    $('#instance-list').bootstrapTable('refresh');
+                },
+                error: function (XMLHttpRequest, textStatus, errorThrown) {
+                    alert(errorThrown);
+                }
+            });
         }
 
         // 检测邮件

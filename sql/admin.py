@@ -29,6 +29,8 @@ from .models import (
     Tunnel,
     AuditEntry,
     TwoFactorAuthConfig,
+    MongoInstanceMeta,
+    MongoInstanceMetricSnapshot,
 )
 
 from sql.form import TunnelForm, InstanceForm
@@ -241,6 +243,42 @@ class TunnelAdmin(admin.ModelAdmin):
     # 不支持修改标签代码
     def get_readonly_fields(self, request, obj=None):
         return ("id",) if obj else ()
+
+
+@admin.register(MongoInstanceMeta)
+class MongoInstanceMetaAdmin(admin.ModelAdmin):
+    list_display = (
+        "instance",
+        "region",
+        "set_name",
+        "l5",
+        "vip",
+        "business_owner",
+        "importance",
+        "env_type",
+    )
+    search_fields = ("instance__instance_name", "region", "set_name", "vip")
+    list_filter = ("importance", "env_type")
+
+
+@admin.register(MongoInstanceMetricSnapshot)
+class MongoInstanceMetricSnapshotAdmin(admin.ModelAdmin):
+    list_display = (
+        "instance",
+        "proxy_count",
+        "mongod_count",
+        "shard_count",
+        "database_count",
+        "table_count",
+        "status",
+        "risk_count",
+        "balancer_status",
+        "balancer_at",
+        "collected_at",
+    )
+    search_fields = ("instance__instance_name",)
+    list_filter = ("status",)
+    readonly_fields = ("collected_at", "error_message")
 
 
 # SQL工单内容

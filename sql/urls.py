@@ -109,6 +109,7 @@ urlpatterns = [
     path("group/changeauditors/", resource_group.changeauditors),
     path("group/user_all_instances/", resource_group.user_all_instances),
     path("instance/list/", instance.lists),
+    path("instance/mongo/refresh/", instance.refresh_mongo_metrics),
     path("instance/user/list", instance_account.users),
     path("instance/user/create/", instance_account.create),
     path("instance/user/edit/", instance_account.edit),

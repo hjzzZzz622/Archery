@@ -23,7 +23,7 @@ except (ImportError, AttributeError) as e:
     logger.error(
         f"failed to import password minxin {settings.PASSWORD_MIXIN_PATH}, {str(e)}"
     )
-    logger.error(f"falling back to dummy mixin")
+    logger.error("falling back to dummy mixin")
     from sql.plugins.password import DummyMixin
 
     PasswordMixin = DummyMixin
@@ -272,6 +272,65 @@ class Instance(models.Model, PasswordMixin):
         db_table = "sql_instance"
         verbose_name = "实例配置"
         verbose_name_plural = "实例配置"
+
+
+class MongoInstanceMeta(models.Model):
+    """Mongo实例静态扩展信息"""
+
+    instance = models.OneToOneField(
+        Instance, on_delete=models.CASCADE, related_name="mongo_meta"
+    )
+    region = models.CharField("region名称", max_length=64, default="", blank=True)
+    set_name = models.CharField("set名称", max_length=64, default="", blank=True)
+    l5 = models.CharField("L5", max_length=64, default="", blank=True)
+    vip = models.CharField("vip", max_length=128, default="", blank=True)
+    business_owner = models.CharField(
+        "业务责任人", max_length=64, default="", blank=True
+    )
+    importance = models.CharField("重要性", max_length=32, default="", blank=True)
+    env_type = models.CharField("环境类型", max_length=32, default="", blank=True)
+    proxy_version = models.CharField("proxy版本", max_length=64, default="", blank=True)
+    mongod_version = models.CharField(
+        "mongod版本", max_length=64, default="", blank=True
+    )
+    cpu_cores = models.IntegerField("CPU/核", null=True, blank=True)
+    memory_gb = models.IntegerField("内存/GB", null=True, blank=True)
+    disk_gb = models.IntegerField("磁盘/GB", null=True, blank=True)
+    create_time = models.DateTimeField("创建时间", auto_now_add=True)
+    update_time = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "sql_mongo_instance_meta"
+        verbose_name = "Mongo实例静态信息"
+        verbose_name_plural = "Mongo实例静态信息"
+
+
+class MongoInstanceMetricSnapshot(models.Model):
+    """Mongo实例动态指标快照"""
+
+    instance = models.OneToOneField(
+        Instance, on_delete=models.CASCADE, related_name="mongo_metric_snapshot"
+    )
+    proxy_count = models.IntegerField("proxy数量", default=0)
+    mongod_count = models.IntegerField("mongod数量", default=0)
+    shard_count = models.IntegerField("分片数", default=0)
+    database_count = models.IntegerField("库数量", default=0)
+    table_count = models.IntegerField("表数量", default=0)
+    status = models.CharField("状态", max_length=20, default="unknown")
+    risk_count = models.IntegerField("隐患个数", default=0)
+    balancer_status = models.CharField(
+        "调匀器状态", max_length=64, default="", blank=True
+    )
+    balancer_at = models.DateTimeField("调匀时间点", null=True, blank=True)
+    collected_at = models.DateTimeField("采集时间", auto_now=True)
+    error_message = models.TextField("错误信息", default="", blank=True)
+
+    class Meta:
+        managed = True
+        db_table = "sql_mongo_instance_metric_snapshot"
+        verbose_name = "Mongo实例动态指标快照"
+        verbose_name_plural = "Mongo实例动态指标快照"
 
 
 SQL_WORKFLOW_CHOICES = (
